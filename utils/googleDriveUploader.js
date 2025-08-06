@@ -14,7 +14,7 @@ async function uploadToDrive(filePath, fileName) {
   const file = await drive.files.create({
     requestBody: {
       name: fileName
-      // ⛔️ Do NOT include `parents` yet
+      // ⛔️ REMOVE the parents field completely
     },
     media: {
       mimeType: 'image/png',
