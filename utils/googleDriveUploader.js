@@ -14,12 +14,14 @@ async function uploadToDrive(filePath, fileName) {
   const file = await drive.files.create({
     requestBody: {
       name: fileName,
-      parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
+      // 🔽 REMOVE this line for now
+      // parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
     },
     media: {
       mimeType: 'image/png',
       body: fs.createReadStream(filePath),
     },
+    supportsAllDrives: true,
     fields: 'id',
   });
 
@@ -29,6 +31,7 @@ async function uploadToDrive(filePath, fileName) {
       role: 'reader',
       type: 'anyone',
     },
+    supportsAllDrives: true,
   });
 
   return `https://drive.google.com/file/d/${file.data.id}/view`;
