@@ -14,6 +14,7 @@ module.exports = async function runCarfaxBot(vin) {
 
   await browser.close();
 
-  const driveLink = await uploadToDrive(filePath, fileName);  // 🔁 This line is key
+  // 🔁 Upload to Drive and return the link
+  const driveLink = await uploadToDrive(filePath, fileName);
   return driveLink;
 };
