@@ -13,9 +13,8 @@ async function uploadToDrive(filePath, fileName) {
 
   const file = await drive.files.create({
     requestBody: {
-      name: fileName,
-      // 🔽 REMOVE this line for now
-      // parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
+      name: fileName
+      // ⛔️ Do NOT include `parents` yet
     },
     media: {
       mimeType: 'image/png',
