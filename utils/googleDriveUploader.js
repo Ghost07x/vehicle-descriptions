@@ -5,7 +5,10 @@ async function uploadToDrive(filePath, fileName) {
   const auth = new google.auth.JWT(
     process.env.GOOGLE_CLIENT_EMAIL,
     null,
-    process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    // Google private keys stored in environment variables often have their
+    // newlines escaped ("\\n"). Convert those sequences back to real
+    // newlines before creating the JWT client.
+    process.env.GOOGLE_PRIVATE_KEY.replace(/\n/g, '\n'),
     ['https://www.googleapis.com/auth/drive']
   );
 
