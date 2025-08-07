@@ -1,14 +1,16 @@
 const { chromium } = require('playwright');
-const uploadToDrive = require('../utils/googleDriveUploader');
+const uploadToDrive = require('../utils/oauthDriveUploader');
 
 module.exports = async function runWindowStickerBot(vin) {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
+  console.log(`🧾 Running Window Sticker bot for VIN: ${vin}`);
   await page.goto('https://velocitywindowstickers.com/login');
-  await page.fill('input[type=\"email\"]', process.env.VELOCITY_USERNAME);
-  await page.fill('input[type=\"password\"]', process.env.VELOCITY_PASSWORD);
-  await page.click('button[type=\"submit\"]');
+
+  await page.fill('input[type="email"]', process.env.VELOCITY_USERNAME);
+  await page.fill('input[type="password"]', process.env.VELOCITY_PASSWORD);
+  await page.click('button[type="submit"]');
   await page.waitForNavigation();
 
   await page.goto(`https://velocitywindowstickers.com/search?vin=${vin}`);
@@ -19,5 +21,7 @@ module.exports = async function runWindowStickerBot(vin) {
   await page.screenshot({ path: filePath });
 
   await browser.close();
-  return await uploadToDrive(filePath, fileName);
+
+  const driveLink = await uploadToDrive(filePath, fileName);
+  return driveLink;
 };
