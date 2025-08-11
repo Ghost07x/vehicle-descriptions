@@ -1,16 +1,12 @@
-// index.js
-const express = require('express');
+// index.js (top)
 const path = require('path');
+const express = require('express');
 const app = express();
-
 app.use(express.json({ limit: '2mb' }));
 
-// Health check
-app.get('/health', (_req, res) => res.json({ ok: true }));
-
-// Import your bots (adjust paths to match your repo)
-const windowSticker = require('./windowSticker');     // or './bots/windowSticker'
-const carfax        = require('./bots/carfax');       // or './bots/carfax'
+// ✅ Use __dirname + explicit .js and the bots/ folder
+const windowSticker = require(path.join(__dirname, 'bots', 'windowSticker.js'));
+const carfax        = require(path.join(__dirname, 'bots', 'carfax.js'));
 
 // Local save dir if you still want files on disk (also fine on Render temp fs)
 const PICTURES_DIR = process.env.SCREENSHOT_DIR
