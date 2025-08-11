@@ -1,16 +1,18 @@
 {
   "name": "vehicle-descriptions",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "login:carfax": "node scripts/carfax-capture-session.js"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
     "express": "^4.18.2",
-    "playwright": "^1.54.2",
-    "googleapis": "^133.0.0"
+    "googleapis": "^133.0.0",
+    "mime": "^3.0.0",
+    "open": "^10.2.0",
+    "playwright": "^1.54.2"
   }
 }
-

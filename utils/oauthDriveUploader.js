@@ -1,86 +1,152 @@
+// utils/oauthDriveUploader.js
+// Upload buffers or local files to Google Drive using a SERVICE ACCOUNT.
+// Env:
+//   GOOGLE_CLIENT_EMAIL
+//   GOOGLE_PRIVATE_KEY            // paste with literal \n in Render; this code fixes it
+//   GOOGLE_DRIVE_FOLDER_ID        // default target folder (optional)
+// Optional alt:
+//   GOOGLE_PRIVATE_KEY_BASE64     // base64 version of the full private key
+
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline');
 const { google } = require('googleapis');
-const open = (...args) => import('open').then(m => m.default(...args));
+const mime = require('mime');
 
-const CREDENTIALS_PATH = path.join(__dirname, '..', 'credentials.json');
-const TOKEN_PATH = path.join(__dirname, '..', 'token.json');
+const GOOGLE_CLIENT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL || '';
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY_BASE64
+  ? Buffer.from(process.env.GOOGLE_PRIVATE_KEY_BASE64, 'base64').toString('utf8')
+  : (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 
-async function authorize() {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH));
-  const { client_secret, client_id, redirect_uris } = credentials.installed;
+const DEFAULT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '';
 
-  const oAuth2Client = new google.auth.OAuth2(
-    client_id,
-    client_secret,
-    redirect_uris[0]
-  );
-
-  if (fs.existsSync(TOKEN_PATH)) {
-    const token = fs.readFileSync(TOKEN_PATH);
-    oAuth2Client.setCredentials(JSON.parse(token));
-    return oAuth2Client;
-  }
-
-  const authUrl = oAuth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/drive.file'],
-  });
-
-  console.log('🔑 Authorize this app by visiting this URL:\n', authUrl);
-  await open(authUrl);
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  const code = await new Promise(resolve => rl.question('Paste the code from Google here: ', resolve));
-  rl.close();
-
-  const { tokens } = await oAuth2Client.getToken(code);
-  oAuth2Client.setCredentials(tokens);
-  fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
-  console.log('✅ Token saved to', TOKEN_PATH);
-
-  return oAuth2Client;
+if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
+  console.warn('[Drive Uploader] Missing GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY');
 }
 
-async function uploadToDrive(filePath, fileName) {
-  const auth = await authorize();
+function makeAuth() {
+  return new google.auth.JWT({
+    email: GOOGLE_CLIENT_EMAIL,
+    key: GOOGLE_PRIVATE_KEY,
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
+  });
+}
+
+function safeFileName(name) {
+  return String(name || 'upload')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+}
+
+function timestamp() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+}
+
+// Helper: convert Buffer -> Readable stream
+function bufferToStream(buffer) {
+  const { Readable } = require('stream');
+  const stream = new Readable();
+  stream.push(buffer);
+  stream.push(null);
+  return stream;
+}
+
+/**
+ * Verify the service account can see the folder
+ * Returns folder metadata if accessible
+ */
+async function verifyDriveFolder(folderId = DEFAULT_FOLDER_ID) {
+  if (!folderId) throw new Error('No folderId provided');
+  const auth = makeAuth();
   const drive = google.drive({ version: 'v3', auth });
 
-  const res = await drive.files.create({
-    requestBody: {
-      name: fileName,
-    },
-    media: {
-      mimeType: 'image/png',
-      body: fs.createReadStream(filePath),
-    },
-    fields: 'id',
+  const { data } = await drive.files.get({
+    fileId: folderId,
+    fields: 'id, name, mimeType, driveId, parents',
+    supportsAllDrives: true,
   });
 
-  await drive.permissions.create({
-    fileId: res.data.id,
-    requestBody: {
-      role: 'reader',
-      type: 'anyone',
-    },
+  if (data.mimeType !== 'application/vnd.google-apps.folder') {
+    throw new Error(`Item is not a folder (mimeType=${data.mimeType})`);
+  }
+  return data;
+}
+
+/**
+ * Upload a Buffer to Google Drive
+ */
+async function uploadBufferToDrive(buffer, name, folderId = DEFAULT_FOLDER_ID, opts = {}) {
+  if (!buffer || !Buffer.isBuffer(buffer)) {
+    throw new Error('uploadBufferToDrive: buffer must be a Buffer');
+  }
+  const auth = makeAuth();
+  const drive = google.drive({ version: 'v3', auth });
+
+  const finalName = safeFileName(name || `upload_${timestamp()}.bin`);
+  const mimeType = opts.mimeType || mime.getType(finalName) || 'application/octet-stream';
+
+  const requestBody = {
+    name: finalName,
+    parents: folderId ? [folderId] : undefined,
+  };
+
+  const file = await drive.files.create({
+    requestBody,
+    media: { mimeType, body: bufferToStream(buffer) },
+    fields: 'id, name, webViewLink, webContentLink, parents',
+    supportsAllDrives: true,          // <-- important for Shared Drives
   });
 
-  return `https://drive.google.com/file/d/${res.data.id}/view`;
+  if (opts.makePublic) {
+    await drive.permissions.create({
+      fileId: file.data.id,
+      requestBody: { role: 'reader', type: 'anyone' },
+      supportsAllDrives: true,
+    });
+  }
+
+  return file.data;
 }
 
-module.exports = uploadToDrive;
+/**
+ * Upload a local file path to Google Drive
+ */
+async function uploadLocalFileToDrive(filePath, name, folderId = DEFAULT_FOLDER_ID, opts = {}) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error(`uploadLocalFileToDrive: file not found: ${filePath}`);
+  }
+  const auth = makeAuth();
+  const drive = google.drive({ version: 'v3', auth });
 
-// 🔽 Only for manual testing
-if (require.main === module) {
-  const testPath = './test-image.png';
-  const testName = 'TestUpload.png';
+  const finalName = safeFileName(name || path.basename(filePath));
+  const mimeType = opts.mimeType || mime.getType(finalName) || 'application/octet-stream';
 
-  uploadToDrive(testPath, testName)
-    .then(link => console.log('✅ Uploaded to:', link))
-    .catch(err => console.error('❌ Upload failed:', err.message));
+  const file = await drive.files.create({
+    requestBody: { name: finalName, parents: folderId ? [folderId] : undefined },
+    media: { mimeType, body: fs.createReadStream(filePath) },
+    fields: 'id, name, webViewLink, webContentLink, parents',
+    supportsAllDrives: true,          // <-- important for Shared Drives
+  });
+
+  if (opts.makePublic) {
+    await drive.permissions.create({
+      fileId: file.data.id,
+      requestBody: { role: 'reader', type: 'anyone' },
+      supportsAllDrives: true,
+    });
+  }
+
+  return file.data;
 }
+
+module.exports = {
+  uploadBufferToDrive,
+  uploadLocalFileToDrive,
+  verifyDriveFolder,
+  // utilities
+  safeFileName,
+  timestamp,
+};

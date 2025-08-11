@@ -1,0 +1,29 @@
+{
+  "login": {
+    "username": "input[name='Stuartjen']",
+    "nextButton": "button:has-text('Next')",
+    "password": "input[name='ytNR*o29$hwdlko6']",
+    "signInButton": "button:has-text('Sign in')",
+    "verifyBySms": "#button-verify-by-sms",
+    "otpField": "input[name='Enter your one time code']",
+    "verifyButton": "button:has-text('Verify')",
+    "postLoginAnchor": "text=Inventory"
+  },
+  "inventory": {
+    "hqLink": "text=Aaron Auto Group HQ - AARON_AG",
+    "storeLink": "text=Aaron Chevrolet in Lake",
+    "pricingTab": "text=Pricing",
+    "reportsCustomize": "button:has-text('Reports/Customize')",
+    "switchReportLink": "text=Switch to this report",
+    "vehicleInventoryLink": "text=Vehicle Inventory SRP/VDP",
+    "filtersButton": "button:has-text('Filters')",
+    "retailCheckbox": "text=Retail",
+    "searchButton": "button:has-text('Search')",
+    "vinSearchBox": "#ext-comp-1026",
+    "goButton": "button:has-text('Go')",
+    "firstVehicleLink": "text=Chevrolet Suburban RST"
+  },
+  "vehicle": {
+    "carfaxButton": "#GaugePageIFrame >> #carfax"
+  }
+}

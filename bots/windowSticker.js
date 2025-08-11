@@ -1,27 +1,33 @@
+// windowSticker.js (do the same pattern in carfax.js)
 const { chromium } = require('playwright');
-const uploadToDrive = require('../utils/oauthDriveUploader');
+const fs = require('fs');
+const path = require('path');
 
-module.exports = async function runWindowStickerBot(vin) {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+function ts() {
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+}
 
-  console.log(`🧾 Running Window Sticker bot for VIN: ${vin}`);
-  await page.goto('https://velocitywindowstickers.com/login');
+module.exports = async function windowSticker(vin, opts = {}) {
+  const saveDir = opts.saveDir || path.join(process.cwd(), 'screenshots');
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox','--disable-dev-shm-usage'] });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  const page = await context.newPage();
 
-  await page.fill('input[type="email"]', process.env.VELOCITY_USERNAME);
-  await page.fill('input[type="password"]', process.env.VELOCITY_PASSWORD);
-  await page.click('button[type="submit"]');
-  await page.waitForNavigation();
+  try {
+    // ... navigate/login/load the sticker page for VIN ...
 
-  await page.goto(`https://velocitywindowstickers.com/search?vin=${vin}`);
-  await page.waitForLoadState('networkidle');
+    const buf = await page.screenshot({ type: 'png', fullPage: true });
+    const filename = `WindowSticker_${vin}_${ts()}.png`;
 
-  const fileName = `sticker_${vin}.png`;
-  const filePath = `/tmp/${fileName}`;
-  await page.screenshot({ path: filePath });
+    fs.mkdirSync(saveDir, { recursive: true });
+    fs.writeFileSync(path.join(saveDir, filename), buf);
 
-  await browser.close();
-
-  const driveLink = await uploadToDrive(filePath, fileName);
-  return driveLink;
+    return { status: 'ok', vin, filename, buffer: opts.returnBuffer ? buf : undefined };
+  } catch (err) {
+    return { status: 'error', vin, error: String(err?.message || err) };
+  } finally {
+    await context.close().catch(()=>{});
+    await browser.close().catch(()=>{});
+  }
 };
