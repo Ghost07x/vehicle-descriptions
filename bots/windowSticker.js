@@ -1,33 +1,59 @@
-// windowSticker.js (do the same pattern in carfax.js)
-const { chromium } = require('playwright');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+const { newPage, waitForPaint } = require('./browser');
 
-function ts() {
-  const d = new Date(), p = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
-}
+const ENTRY = process.env.WINDOW_STICKER_ENTRY;
 
-module.exports = async function windowSticker(vin, opts = {}) {
-  const saveDir = opts.saveDir || path.join(process.cwd(), 'screenshots');
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox','--disable-dev-shm-usage'] });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
-  const page = await context.newPage();
+module.exports = async function windowSticker(vin, { saveDir, returnBuffer } = {}) {
+  const safeVin = String(vin || '').trim().toUpperCase();
+  const filename = `WindowSticker_${safeVin}.png`;
+  const savedPath = saveDir ? path.join(saveDir, filename) : undefined;
 
+  const { page, ctx, _ownedBrowser } = await newPage();
   try {
-    // ... navigate/login/load the sticker page for VIN ...
+    if (!ENTRY) throw new Error('WINDOW_STICKER_ENTRY not set');
+    const url = ENTRY.includes('{vin}') ? ENTRY.replace('{vin}', safeVin) : ENTRY;
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    const buf = await page.screenshot({ type: 'png', fullPage: true });
-    const filename = `WindowSticker_${vin}_${ts()}.png`;
+    // If your site needs a VIN form submit, add it here.
 
-    fs.mkdirSync(saveDir, { recursive: true });
-    fs.writeFileSync(path.join(saveDir, filename), buf);
+    const isPdfLike = await page.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll('embed,object,iframe'));
+      return nodes.some(el => {
+        const t = (el.type || el.getAttribute('type') || '').toLowerCase();
+        const src = (el.src || el.data || '').toLowerCase();
+        return t.includes('application/pdf') || /\.pdf(\b|[#?])/.test(src);
+      });
+    });
 
-    return { status: 'ok', vin, filename, buffer: opts.returnBuffer ? buf : undefined };
-  } catch (err) {
-    return { status: 'error', vin, error: String(err?.message || err) };
+    await waitForPaint(page);
+
+    const candidates = [
+      'text=/Window\\s*Sticker|Monroney|MSRP/i',
+      '#sticker',
+      '.sticker',
+      'canvas',
+    ];
+    let target = null;
+    for (const sel of candidates) {
+      const loc = page.locator(sel).first();
+      const count = await loc.count().catch(() => 0);
+      if (count > 0) { target = loc; break; }
+    }
+
+    let buffer = null;
+    if (target) buffer = await target.screenshot({ path: savedPath }).catch(() => null);
+    if (!buffer) buffer = await page.screenshot({ fullPage: false, path: savedPath });
+
+    const out = { status: 'ok', vin: safeVin, filename };
+    if (savedPath) out.savedPath = savedPath;
+    if (returnBuffer) out.buffer = buffer;
+    if (isPdfLike && (!buffer || buffer.length < 5000)) out.note = 'PDF viewer detected; headless screenshots can be blank.';
+    return out;
+  } catch (e) {
+    return { status: 'error', vin: safeVin, filename, error: e?.message || String(e) };
   } finally {
-    await context.close().catch(()=>{});
-    await browser.close().catch(()=>{});
+    try { await ctx.close(); } catch {}
+    if (_ownedBrowser) { try { await _ownedBrowser.close(); } catch {} }
   }
 };

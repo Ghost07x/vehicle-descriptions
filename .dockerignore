@@ -1,0 +1,10 @@
+node_modules
+.git
+.env
+.verify_artifacts
+.verify_server.log
+screenshots
+Pictures
+tmp
+.DS_Store
+.vscode

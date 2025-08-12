@@ -1,103 +1,53 @@
-// bots/carfax.js
-const { chromium } = require('playwright');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+const { newPage, waitForPaint } = require('./browser');
 
-const LOGIN_ENTRY = 'https://www.carfaxonline.com';
-const STORAGE_STATE_PATH = process.env.STORAGE_STATE_PATH || path.join('/tmp', 'carfax_storageState.json');
+const STORAGE_STATE_PATH = process.env.STORAGE_STATE_PATH || '/tmp/carfax_storageState.json';
 
-const VIN_INPUT_SELECTOR = 'input[name="vin"], input#vin, [placeholder*="VIN" i]';
-const SUBMIT_SELECTOR = 'button:has-text("Get CARFAX Report"), [role="button"]:has-text("Get CARFAX Report")';
-const REPORT_READY_TEXT = 'CARFAX Vehicle History Report';
+module.exports = async function carfax(vin, { saveDir, returnBuffer } = {}) {
+  const safeVin = String(vin || '').trim().toUpperCase();
+  const filename = `CARFAX_${safeVin}.png`;
+  const savedPath = saveDir ? path.join(saveDir, filename) : undefined;
 
-function ts() {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
-}
+  const ctxOpts = { acceptDownloads: false };
+  if (fs.existsSync(STORAGE_STATE_PATH)) ctxOpts.storageState = STORAGE_STATE_PATH;
 
-async function ensureLoggedIn(page) {
-  await page.goto(LOGIN_ENTRY, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  if (await page.$(VIN_INPUT_SELECTOR)) return;
-
-  const emailSel = 'input[type="email"], input[name="username"], input#username';
-  const passSel  = 'input[type="password"], input[name="password"], input#password';
-  const submitSel = 'button[type="submit"], button:has-text("Sign in"), [data-testid*="login"]';
-
-  const emailField = await page.$(emailSel);
-  if (emailField) {
-    await page.fill(emailSel, process.env.CARFAX_USER || '', { timeout: 30000 });
-    await page.fill(passSel, process.env.CARFAX_PASS || '', { timeout: 30000 });
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle', timeout: 60000 }).catch(() => {}),
-      page.click(submitSel, { timeout: 30000 }),
-    ]);
-  }
-
-  await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
-  if (!(await page.$(VIN_INPUT_SELECTOR))) {
-    fs.writeFileSync('carfax_debug_error.html', await page.content());
-    await page.screenshot({ path: 'carfax_debug_error.png', fullPage: true }).catch(() => {});
-    throw new Error('ERR_LOGIN_FAILED');
-  }
-}
-
-/**
- * @param {string} vin
- * @param {object} opts
- *  - saveDir?: string   [default: process.env.SCREENSHOT_DIR or ./screenshots]
- *  - returnBuffer?: boolean
- */
-module.exports = async function runCarfax(vin, opts = {}) {
-  if (!vin) throw new Error('ERR_NO_VIN');
-
-  const saveDir = opts.saveDir || process.env.SCREENSHOT_DIR || path.join(process.cwd(), 'screenshots');
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-  const storageExists = fs.existsSync(STORAGE_STATE_PATH);
-  const context = await browser.newContext({
-    storageState: storageExists ? STORAGE_STATE_PATH : undefined,
-    viewport: { width: 1440, height: 900 },
-    deviceScaleFactor: 2
-  });
-  const page = await context.newPage();
-
+  const { page, ctx, _ownedBrowser } = await newPage(ctxOpts);
   try {
-    await ensureLoggedIn(page);
-    await context.storageState({ path: STORAGE_STATE_PATH });
+    await page.goto('https://www.carfaxonline.com', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    await page.waitForSelector(VIN_INPUT_SELECTOR, { timeout: 30000 });
-    await page.fill(VIN_INPUT_SELECTOR, vin, { timeout: 15000 });
+    const looksLikeLogin = await page.$('input[type="password"], [name="password"], text=/Sign[ -]?In/i');
+    if (looksLikeLogin) {
+      return { status: 'auth_error', vin: safeVin, filename, error: 'CARFAX session expired or missing' };
+    }
 
-    const [maybeNewPage] = await Promise.all([
-      page.context().waitForEvent('page').catch(() => null),
-      page.click(SUBMIT_SELECTOR, { timeout: 20000 }),
-    ]);
-    const reportPage = maybeNewPage || page;
+    const vinInput = await page.$('input[name="vin"], input#vin, [placeholder*="VIN" i]');
+    if (vinInput) {
+      await vinInput.fill(safeVin);
+      await Promise.all([
+        page.keyboard.press('Enter'),
+        page.waitForLoadState('networkidle', { timeout: 120000 }),
+      ]);
+    } else {
+      await page.goto(`https://www.carfaxonline.com/vhrs/report/${safeVin}`, { waitUntil: 'networkidle', timeout: 120000 }).catch(() => {});
+    }
 
-    await reportPage.waitForLoadState('domcontentloaded', { timeout: 60000 });
-    await reportPage.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
-    try {
-  await reportPage.waitForSelector(`text=${REPORT_READY_TEXT}`, { timeout: 60000 });
-} catch {
-  // fallback signals if the report text isn't present but page is still ready
-  await reportPage.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  await reportPage.waitForTimeout(1000);
-}
+    const reportEl = await page.waitForSelector('text=/Vehicle\\s*History\\s*Report|CARFAX\\s*Report/i', { timeout: 15000 }).catch(() => null);
+    await waitForPaint(page);
 
-    const buf = await reportPage.screenshot({ type: 'png', fullPage: true });
-    const filename = `CARFAX_${vin}_${ts()}.png`;
+    let buffer = null;
+    if (reportEl) buffer = await reportEl.screenshot({ path: savedPath }).catch(() => null);
+    if (!buffer) buffer = await page.screenshot({ fullPage: false, path: savedPath });
 
-    fs.mkdirSync(saveDir, { recursive: true });
-    const savedPath = path.join(saveDir, filename);
-    fs.writeFileSync(savedPath, buf);
-
-    return { status: 'ok', vin, filename, savedPath, buffer: opts.returnBuffer ? buf : undefined, usedStoredSession: storageExists };
-  } catch (err) {
-    fs.writeFileSync('carfax_debug_error.html', await page.content().catch(() => ''));
-    await page.screenshot({ path: 'carfax_debug_error.png', fullPage: true }).catch(() => {});
-    return { status: 'error', vin, error: String(err && err.message ? err.message : err) };
+    const out = { status: 'ok', vin: safeVin, filename };
+    if (savedPath) out.savedPath = savedPath;
+    if (returnBuffer) out.buffer = buffer;
+    if (!reportEl) out.note = 'Did not detect report marker; screenshot may not be the report.';
+    return out;
+  } catch (e) {
+    return { status: 'error', vin: safeVin, filename, error: e?.message || String(e) };
   } finally {
-    await context.close().catch(() => {});
-    await browser.close().catch(() => {});
+    try { await ctx.close(); } catch {}
+    if (_ownedBrowser) { try { await _ownedBrowser.close(); } catch {} }
   }
 };

@@ -1,0 +1,25 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Local artifacts
+.verify_artifacts/
+.verify_server.log
+screenshots/
+Pictures/
+tmp/
+carfax_storageState.json
+
+# Playwright reports (if any)
+playwright-report/
+blob-report/
+test-results/
+
+# OS/editor files
+.DS_Store
+.vscode/
