@@ -23,3 +23,9 @@ test-results/
 # OS/editor files
 .DS_Store
 .vscode/
+
+# Root debug/artifacts
+/*.png
+/*_debug_*
+/carfax_login_page.html
+/Descriptions/
