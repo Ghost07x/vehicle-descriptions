@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: vehicle-descriptions
+    runtime: docker
+    repo: https://github.com/Ghost07x/vehicle-descriptions
+    branch: main
+    region: oregon
+    plan: starter
+    healthCheckPath: /
+    envVars:
+      - key: CARFAX_USER
+        value: stuart@aaronag.com
+      - key: CARFAX_PASS
+        sync: false
+      - key: VELOCITY_USERNAME
+        value: stuart@aaronag.com
+      - key: VELOCITY_PASSWORD
+        sync: false
+      - key: PORT
+        value: 5000
+    autoDeploy: true
